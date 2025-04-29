@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+
+  bot:
+    build: .
+    environment:
+      BOT_TOKEN: 8177325212:AAHyEHDl54YuuFCf6s3aQqmDttEad0QVikA
+      YC_SERVICE_ACCOUNT_ID: YCAJED2FDEw2PcU0hzFK8m4zk
+      YC_IAM_TOKEN: YCMrkYtwQ6tLldsUr6mpBVEtsADPe3bY1H5vgfuM
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

@@ -111,8 +111,8 @@ func initAWS(ctx context.Context) {
 	})
 
 	creds := credentials.NewStaticCredentialsProvider(
-		os.Getenv("YC_SERVICE_ACCOUNT_ID"),
-		os.Getenv("YC_IAM_TOKEN"),
+		os.Getenv("YC_SERVICE_ACCESS_ID"),
+		os.Getenv("YC_ACCESS_KEY"),
 		"",
 	)
 

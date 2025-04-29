@@ -26,11 +26,5 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /app/internal/bot_server_service ./bot_server_service
 
-ENV BOT_TOKEN="8177325212:AAHyEHDl54YuuFCf6s3aQqmDttEad0QVikA"
-
-ENV YC_SERVICE_ACCOUNT_ID="YCAJED2FDEw2PcU0hzFK8m4zk"
-
-ENV YC_IAM_TOKEN="YCMrkYtwQ6tLldsUr6mpBVEtsADPe3bY1H5vgfuM"
-
 ENTRYPOINT ["./bot_server_service"]
 

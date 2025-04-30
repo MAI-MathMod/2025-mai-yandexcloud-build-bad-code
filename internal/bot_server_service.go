@@ -243,7 +243,7 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 					go func(m sqstypes.Message) {
 						attr := m.MessageAttributes["ChatID"]
 						chatID, _ := strconv.ParseInt(*attr.StringValue, 10, 64)
-						HandleUpdate(bot, BotEvent{ChatID: chatID, Text: *m.Body})
+						handleUpdate(bot, BotEvent{ChatID: chatID, Text: *m.Body})
 
 						_, err := sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 							QueueUrl:      &ragResponseURL,
@@ -272,8 +272,11 @@ func isMediaMessage(msg *tgbotapi.Message) bool {
 
 func checkCommand(event *BotEvent, bot *tgbotapi.BotAPI) bool {
 	switch event.Text {
-	case "/start", "Перевод на оператора":
-		HandleUpdate(bot, *event)
+	case "/start":
+		handleUpdate(bot, *event)
+		return true
+	case "Перевод на оператора":
+		handleOperatorTransfer(event, bot)
 		return true
 	}
 	return false

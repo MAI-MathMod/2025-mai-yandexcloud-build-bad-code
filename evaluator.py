@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import numpy as np
 from scipy.spatial.distance import cdist
 from datetime import datetime
@@ -26,19 +26,22 @@ class RAGEvaluator:
         emb2 = np.array(self.embedding_model.run(text2))
         return 1 - cdist([emb1], [emb2], metric='cosine')[0][0]
     
-    def evaluate_context_recall(self, query: str, response: str, reference_context: str) -> float:
+    def evaluate_context_recall(self, query: str, response: str, reference_contexts: Tuple[str]) -> float:
         """
         Оценка полноты извлечения контекста (Context Recall)
         
         Args:
             query: исходный запрос
             response: ответ системы
-            reference_context: эталонный контекст
+            reference_contexts: кортеж эталонных контекстов
             
         Returns:
             Оценка от 0 до 1
         """
-        return self.calculate_similarity(reference_context, response)
+        # Вычисляем схожесть с каждым эталонным контекстом
+        similarities = [self.calculate_similarity(context, response) for context in reference_contexts]
+        # Возвращаем максимальную схожесть
+        return max(similarities)
     
     def evaluate_faithfulness(self, response: str, retrieved_context: str) -> float:
         """
@@ -68,9 +71,9 @@ class RAGEvaluator:
     
     def evaluate_rag_system(
         self,
-        assistant: Any,
+        assistant: Assistant,
         test_queries: List[str],
-        expected_contexts: List[str],
+        expected_contexts: List[Tuple[str]],
         golden_answers: List[str]
     ) -> Dict[str, float]:
         """
@@ -79,7 +82,7 @@ class RAGEvaluator:
         Args:
             assistant: экземпляр ассистента
             test_queries: список тестовых запросов
-            expected_contexts: список эталонных контекстов
+            expected_contexts: список кортежей с эталонными контекстами
             golden_answers: список эталонных ответов
             
         Returns:
@@ -92,18 +95,18 @@ class RAGEvaluator:
         faithfulness_scores = []
         factual_correctness_scores = []
         
-        with assistant:
-            for query, ref_context, golden_answer in zip(test_queries, expected_contexts, golden_answers):
+        for query, ref_contexts, golden_answer in zip(test_queries, expected_contexts, golden_answers):
+            # Создаем новый чат для каждого запроса
+            chat = assistant.create_chat()
+            
+            try:
                 # 1. Получаем ответ и извлеченные документы
-                response = assistant.ask(query)
-                retrieved_docs = assistant.get_retrieved_context()
+                response = chat.ask(query)
+                retrieved_docs = chat.get_retrieved_context()
                 
-                # 2. Context Recall: сравниваем КАЖДЫЙ документ с эталоном
-                doc_recall_scores = [
-                    self.calculate_similarity(ref_context, doc) 
-                    for doc in retrieved_docs
-                ]
-                context_recall_scores.append(np.max(doc_recall_scores))  # Берем лучший
+                # 2. Context Recall: сравниваем с каждым эталонным контекстом
+                context_recall = self.evaluate_context_recall(query, response, ref_contexts)
+                context_recall_scores.append(context_recall)
                 
                 # 3. Faithfulness: находим документ, наиболее похожий на ответ
                 if retrieved_docs:
@@ -111,13 +114,16 @@ class RAGEvaluator:
                         self.calculate_similarity(response, doc) 
                         for doc in retrieved_docs
                     ]
-                    faithfulness_scores.append(np.max(doc_faith_scores))
+                    faithfulness_scores.append(max(doc_faith_scores))
                 else:
                     faithfulness_scores.append(0.0)
                 
-                # 4. Factual Correctness (не зависит от документов)
+                # 4. Factual Correctness
                 fc = self.calculate_similarity(response, golden_answer)
                 factual_correctness_scores.append(fc)
+            finally:
+                # Закрываем чат
+                chat.close()
         
         return {
             "context_recall": np.mean(context_recall_scores),
@@ -128,37 +134,51 @@ class RAGEvaluator:
 
 # Пример использования
 if __name__ == "__main__":
+    import json
+    import os
+    import argparse
+    
+    # Парсинг аргументов командной строки
+    parser = argparse.ArgumentParser(description='Оценка RAG-системы')
+    parser.add_argument('--test-data', type=str, help='Путь к файлу с тестовыми данными')
+    args = parser.parse_args()
+    
     # Конфигурация
     FOLDER_ID, API_KEY = get_environment_variables()
     
-    # Тестовые данные
-    TEST_QUERIES = [
-        "Какие документы нужны для поступления в МАИ?",
-        "Когда начинается приемная кампания?",
-        "Какие направления подготовки есть в МАИ?"
-    ]
-    
-    EXPECTED_CONTEXTS = [
-        "Для поступления в МАИ необходимы: паспорт, документ об образовании, результаты ЕГЭ, 2 фотографии 3x4.",
-        "Приемная кампания в МАИ традиционно начинается 20 июня и заканчивается 26 июля.",
-        "МАИ предлагает направления: Авиастроение, Ракетные комплексы, Информатика, Радиоэлектроника."
-    ]
-    
-    GOLDEN_ANSWERS = [
-        "Для поступления в МАИ вам понадобятся: паспорт, аттестат или диплом, результаты ЕГЭ и 2 фотографии 3x4 см.",
-        "Прием документов в МАИ начинается 20 июня каждого года.",
-        "В МАИ доступны такие направления как Авиастроение, Ракетные комплексы, Информатика и другие."
-    ]
+    # Загрузка тестовых данных
+    if args.test_data:
+        if not os.path.exists(args.test_data):
+            raise FileNotFoundError(f"Файл с тестовыми данными не найден: {args.test_data}")
+        
+        with open(args.test_data, 'r', encoding='utf-8') as f:
+            test_data = json.load(f)
+            
+        TEST_QUERIES = test_data['test_queries']
+        EXPECTED_CONTEXTS = test_data['expected_contexts']
+        GOLDEN_ANSWERS = test_data['golden_answers']
+        
+        print(f"Загружены тестовые данные из файла: {args.test_data}")
+        print(f"Дата генерации: {test_data['generated_at']}")
+    else:
+        # Если файл не указан, генерируем новые данные
+        from data_generator import DataGenerator
+        generator = DataGenerator()
+        TEST_QUERIES, EXPECTED_CONTEXTS, GOLDEN_ANSWERS, filepath = generator.generate_test_data(num_samples=2)
+        print(f"Сгенерированы новые тестовые данные и сохранены в: {filepath}")
     
     # Инициализация оценщика
     evaluator = RAGEvaluator(FOLDER_ID, API_KEY)
     
-    # Инициализация ассистента (ваш код)
+    # Инициализация ассистента
     assistant = Assistant(
         folder_id=FOLDER_ID,
         api_key=API_KEY,
         data_dir="data",
-        log_dir="logs"
+        log_dir="logs",
+        model_name="yandexgpt",
+        model_version="rc",
+        ttl_days=1
     )
     
     # Запуск оценки
@@ -169,6 +189,6 @@ if __name__ == "__main__":
         GOLDEN_ANSWERS
     )
     
-    print("Результаты оценки:")
+    print("\nРезультаты оценки:")
     for metric, score in results.items():
         print(f"{metric}: {score:.4f}")

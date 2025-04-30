@@ -30,7 +30,7 @@ var (
 	botQueueURL     string
 	ragResponseURL  string
 	botQueueName    = "bot-events.fifo"
-	ragResponseName = "RAG_response.fifo"
+	ragResponseName = "RAG_response"
 	batchBuf        chan *sqs.SendMessageInput
 )
 
@@ -76,6 +76,20 @@ func main() {
 				continue
 			}
 
+			if isMediaMessage(update.Message) {
+				msg := tgbotapi.NewMessage(
+					update.Message.Chat.ID,
+					"⚠️ Я принимаю только текстовые сообщения. Пожалуйста, отправьте текст.",
+				)
+				bot.Send(msg)
+				continue
+			}
+
+			username := "Anonymous"
+			if update.Message.From != nil && update.Message.From.UserName != "" {
+				username = update.Message.From.UserName
+			}
+
 			ev := &BotEvent{
 				ChatID: update.Message.Chat.ID,
 				Text:   update.Message.Text,
@@ -89,6 +103,10 @@ func main() {
 					"ChatID": {
 						DataType:    aws.String("Number"),
 						StringValue: aws.String(strconv.FormatInt(ev.ChatID, 10)),
+					},
+					"Username": {
+						DataType:    aws.String("String"),
+						StringValue: aws.String(username),
 					},
 				},
 			}
@@ -131,7 +149,6 @@ func initAWS(ctx context.Context) {
 
 	sqsClient = sqs.NewFromConfig(cfg)
 
-	// Create bot-events queue
 	botOut, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
 		QueueName: &botQueueName,
 		Attributes: map[string]string{
@@ -145,13 +162,8 @@ func initAWS(ctx context.Context) {
 	botQueueURL = *botOut.QueueUrl
 	log.Printf("Bot-events Queue URL: %s", botQueueURL)
 
-	// Create RAG_response queue
 	ragOut, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
 		QueueName: &ragResponseName,
-		Attributes: map[string]string{
-			"FifoQueue":                 "true",
-			"ContentBasedDeduplication": "true",
-		},
 	})
 	if err != nil {
 		log.Fatalf("failed to create RAG_response queue: %v", err)
@@ -241,6 +253,17 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 			}
 		}()
 	}
+}
+
+func isMediaMessage(msg *tgbotapi.Message) bool {
+	return msg.Photo != nil ||
+		msg.Video != nil ||
+		msg.Document != nil ||
+		msg.Audio != nil ||
+		msg.Voice != nil ||
+		msg.VideoNote != nil ||
+		msg.Sticker != nil ||
+		msg.Location != nil
 }
 
 func closeAWS(ctx context.Context) {

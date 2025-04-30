@@ -4,17 +4,20 @@ from assistant import Assistant
 from utils import get_environment_variables
 import os
 from typing import Dict
+from datetime import datetime
 
 def main() -> None:
-    """Main function to run the MAI admissions assistant."""
+    """Главная функция ассистента приёмной комиссии МАИ"""
     try:
+        # Получение переменных окружения
         folder_id, api_key = get_environment_variables()
         
+        # Инициализация клиента YMQ
         yc_access_id = os.getenv('YC_SERVICE_ACCESS_ID')
         yc_access_key = os.getenv('YC_ACCESS_KEY')
         
         if not all([yc_access_id, yc_access_key]):
-            raise ValueError("YMQ credentials not found in environment variables")
+            raise ValueError("Не найдены учетные данные YMQ в переменных окружения")
             
         session = boto3.session.Session(
             aws_access_key_id=yc_access_id,
@@ -27,25 +30,31 @@ def main() -> None:
             endpoint_url='https://message-queue.api.cloud.yandex.net'
         )
         
+        # URL очередей из переменных окружения
         bot_events_queue_url = os.getenv('BOT_EVENTS_QUEUE_URL')
         rag_response_queue_url = os.getenv('RAG_RESPONSE_QUEUE_URL')
         
         if not bot_events_queue_url or not rag_response_queue_url:
-            raise ValueError("Queue URLs not found in environment variables")
+            raise ValueError("URL очередей не найдены в переменных окружения")
         
-        print('Инициализация ассистента...', end='\r', flush=True)
+        # Инициализация ассистента
+        print("\n🔄 Инициализация AI-ассистента МАИ...", end='\r', flush=True)
         assistant = Assistant(
             folder_id=folder_id,
             api_key=api_key,
             log_dir="logs"
         )
-        print(' ' * 30, end='\r')
+        print(" " * 50, end='\r')
         
+        # Словарь активных чатов
         active_chats: Dict[int, Assistant.Chat] = {}
         
+        print("\n✅ Ассистент готов к работе. Ожидание сообщений...\n")
+        
+        # Основной цикл обработки сообщений
         while True:
             try:
-                # Получение сообщения из очереди с атрибутами
+                # Получение сообщения из очереди
                 response = sqs.receive_message(
                     QueueUrl=bot_events_queue_url,
                     MaxNumberOfMessages=1,
@@ -59,32 +68,41 @@ def main() -> None:
                 message = response['Messages'][0]
                 receipt_handle = message['ReceiptHandle']
                 user_message = message['Body']
-                
-                # Извлечение ChatID из атрибутов сообщения
                 message_attrs = message.get('MessageAttributes', {})
-                chat_id_attr = message_attrs.get('ChatID', {}).get('StringValue')
-                
-                if not chat_id_attr:
-                    print("ChatID attribute missing in message")
+
+                # Извлечение информации о пользователе
+                username = next((
+                    message_attrs[key]['StringValue'] 
+                    for key in ['Username', 'username', 'UserName', 'user_name', 'FromUser'] 
+                    if key in message_attrs and 'StringValue' in message_attrs[key]
+                ), 'Анонимный пользователь')
+
+                chat_id = None
+                for key in ['ChatID', 'chat_id', 'ChatId']:
+                    if key in message_attrs:
+                        try:
+                            chat_id = int(message_attrs[key]['StringValue'])
+                            break
+                        except (ValueError, KeyError):
+                            continue
+
+                if not chat_id:
+                    print(f"⚠️ [{datetime.now().strftime('%H:%M:%S')}] Сообщение от {username}: отсутствует ChatID")
                     continue
-                    
-                try:
-                    chat_id = int(chat_id_attr)
-                except ValueError:
-                    print(f"Invalid ChatID format: {chat_id_attr}")
-                    continue
-                
-                # Создание или получение существующего чата
+
+                # Логирование нового пользователя
                 if chat_id not in active_chats:
                     active_chats[chat_id] = assistant.create_chat()
-                    print(f"Создан новый чат для ChatID: {chat_id}")
+                    print(f"\n🌟 [{datetime.now().strftime('%H:%M:%S')}] Новый пользователь: {username} (ID: {chat_id})")
                 
+                # Обработка запроса
                 chat = active_chats[chat_id]
+                print(f"\n💬 [{datetime.now().strftime('%H:%M:%S')}] Запрос от {username}: {user_message[:50]}...")
                 
-                # Генерация ответа
                 assistant_response = chat.ask(user_message)
+                print(f"📨 [{datetime.now().strftime('%H:%M:%S')}] Ответ для {username}: {assistant_response[:50]}...")
                 
-                # Отправка ответа в очередь с корректными атрибутами
+                # Отправка ответа
                 sqs.send_message(
                     QueueUrl=rag_response_queue_url,
                     MessageBody=assistant_response,
@@ -93,6 +111,10 @@ def main() -> None:
                         'ChatID': {
                             'StringValue': str(chat_id),
                             'DataType': 'Number'
+                        },
+                        'Username': {
+                            'StringValue': username,
+                            'DataType': 'String'
                         }
                     }
                 )
@@ -102,19 +124,22 @@ def main() -> None:
                     QueueUrl=bot_events_queue_url,
                     ReceiptHandle=receipt_handle
                 )
-                
+
             except KeyboardInterrupt:
-                print("\nРабота завершена.")
-                # Закрытие всех активных чатов перед выходом
-                for chat in active_chats.values():
+                print("\n🛑 Завершение работы...")
+                # Закрытие всех чатов
+                for cid, chat in active_chats.items():
                     chat.close()
                 break
+            
             except Exception as e:
-                print(f"Ошибка обработки сообщения: {str(e)}")
+                error_time = datetime.now().strftime('%H:%M:%S')
+                username_info = f" ({username})" if 'username' in locals() else ""
+                print(f"\n⚠️ [{error_time}] Ошибка обработки{username_info}: {str(e)}")
                 continue
 
     except Exception as e:
-        print(f"Критическая ошибка: {str(e)}")
+        print(f"\n⛔ Критическая ошибка: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+flit
+git+https://github.com/yandex-cloud/yandex-cloud-ml-sdk.git@assistants_fc#egg=yandex-cloud-ml-sdk
+scipy
+python-dotenv
+numpy

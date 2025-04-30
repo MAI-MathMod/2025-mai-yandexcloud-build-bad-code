@@ -28,7 +28,7 @@ const (
 var (
 	sqsClient *sqs.Client
 	queueURL  string
-	queueName = "bot-events"
+	queueName = "bot-events.fifo"
 	batchBuf  chan *sqs.SendMessageInput
 )
 
@@ -56,7 +56,7 @@ func main() {
 	startConsumers(ctx, bot)
 
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
+	u.Timeout = 30
 	updates := bot.GetUpdatesChan(u)
 
 	for {
@@ -80,8 +80,9 @@ func main() {
 			}
 
 			input := &sqs.SendMessageInput{
-				QueueUrl:    &queueURL,
-				MessageBody: aws.String(ev.Text),
+				QueueUrl:       &queueURL,
+				MessageBody:    aws.String(ev.Text),
+				MessageGroupId: aws.String(strconv.FormatInt(ev.ChatID, 10)),
 				MessageAttributes: map[string]sqstypes.MessageAttributeValue{
 					"ChatID": {
 						DataType:    aws.String("Number"),
@@ -128,7 +129,13 @@ func initAWS(ctx context.Context) {
 
 	sqsClient = sqs.NewFromConfig(cfg)
 
-	out, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{QueueName: &queueName})
+	out, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
+		QueueName: &queueName,
+		Attributes: map[string]string{
+			"FifoQueue":                 "true",
+			"ContentBasedDeduplication": "true",
+		},
+	})
 	if err != nil {
 		log.Fatalf("failed to create queue: %v", err)
 	}
@@ -166,6 +173,7 @@ func initBatchSender(ctx context.Context) {
 					Id:                aws.String(strconv.Itoa(len(batch))),
 					MessageBody:       in.MessageBody,
 					MessageAttributes: in.MessageAttributes,
+					MessageGroupId:    in.MessageGroupId,
 				})
 				if len(batch) >= batchSize {
 					flush()

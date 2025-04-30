@@ -25,7 +25,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, event BotEvent) {
 
 	switch event.Text {
 	case "/start":
-		msg = tgbotapi.NewMessage(event.ChatID, "Здравствуйте! Я являюсь ИИ ассистентом приёмной комиссии Москвоского Авиационного Института. Я готов ответить на ваши вопросы, связанные с поступлением в Московский авиационный институт. Чем я могу вам помочь?")
+		msg = tgbotapi.NewMessage(event.ChatID, "Здравствуйте! Я являюсь AI ассистентом приёмной комиссии Москвоского Авиационного Института, готов ответить на ваши вопросы, связанные с поступлением в Московский авиационный институт. Чем я могу вам помочь?")
 		msg.ReplyMarkup = GetMainKeyboard()
 	case "Перевод на оператора":
 		msg = tgbotapi.NewMessage(event.ChatID, "Переводим на оператора")

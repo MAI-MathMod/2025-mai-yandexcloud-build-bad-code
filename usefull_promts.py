@@ -78,7 +78,7 @@ question_topics = """
 class TopicsExtractor:
     def __init__(self, question_topics):
         self.model = sdk.models.completions('yandexgpt', model_version='rc')
-        model.configure(temperature=0.3, response_format='json')
+        self.model.configure(temperature=0.3, response_format='json')
         self.system_prompt = TOPICS_EXTRACTOR_PROMPT.format(question_topics=question_topics)
     
     def __call__(self, user_message: str) -> list:

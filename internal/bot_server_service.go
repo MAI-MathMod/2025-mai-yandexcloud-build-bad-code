@@ -26,10 +26,12 @@ const (
 )
 
 var (
-	sqsClient *sqs.Client
-	queueURL  string
-	queueName = "bot-events.fifo"
-	batchBuf  chan *sqs.SendMessageInput
+	sqsClient       *sqs.Client
+	botQueueURL     string
+	ragResponseURL  string
+	botQueueName    = "bot-events.fifo"
+	ragResponseName = "RAG_response.fifo"
+	batchBuf        chan *sqs.SendMessageInput
 )
 
 func main() {
@@ -80,7 +82,7 @@ func main() {
 			}
 
 			input := &sqs.SendMessageInput{
-				QueueUrl:       &queueURL,
+				QueueUrl:       &botQueueURL,
 				MessageBody:    aws.String(ev.Text),
 				MessageGroupId: aws.String(strconv.FormatInt(ev.ChatID, 10)),
 				MessageAttributes: map[string]sqstypes.MessageAttributeValue{
@@ -129,18 +131,33 @@ func initAWS(ctx context.Context) {
 
 	sqsClient = sqs.NewFromConfig(cfg)
 
-	out, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
-		QueueName: &queueName,
+	// Create bot-events queue
+	botOut, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
+		QueueName: &botQueueName,
 		Attributes: map[string]string{
 			"FifoQueue":                 "true",
 			"ContentBasedDeduplication": "true",
 		},
 	})
 	if err != nil {
-		log.Fatalf("failed to create queue: %v", err)
+		log.Fatalf("failed to create bot-events queue: %v", err)
 	}
-	queueURL = *out.QueueUrl
-	log.Printf("Queue URL: %s", queueURL)
+	botQueueURL = *botOut.QueueUrl
+	log.Printf("Bot-events Queue URL: %s", botQueueURL)
+
+	// Create RAG_response queue
+	ragOut, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
+		QueueName: &ragResponseName,
+		Attributes: map[string]string{
+			"FifoQueue":                 "true",
+			"ContentBasedDeduplication": "true",
+		},
+	})
+	if err != nil {
+		log.Fatalf("failed to create RAG_response queue: %v", err)
+	}
+	ragResponseURL = *ragOut.QueueUrl
+	log.Printf("RAG_response Queue URL: %s", ragResponseURL)
 }
 
 func initBatchSender(ctx context.Context) {
@@ -154,7 +171,7 @@ func initBatchSender(ctx context.Context) {
 				return
 			}
 			_, err := sqsClient.SendMessageBatch(ctx, &sqs.SendMessageBatchInput{
-				QueueUrl: &queueURL,
+				QueueUrl: &botQueueURL,
 				Entries:  batch,
 			})
 			if err != nil {
@@ -196,7 +213,7 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 				}
 
 				out, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-					QueueUrl:              &queueURL,
+					QueueUrl:              &ragResponseURL,
 					MaxNumberOfMessages:   10,
 					WaitTimeSeconds:       20,
 					MessageAttributeNames: []string{"All"},
@@ -213,7 +230,7 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 						HandleUpdate(bot, BotEvent{ChatID: chatID, Text: *m.Body})
 
 						_, err := sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-							QueueUrl:      &queueURL,
+							QueueUrl:      &ragResponseURL,
 							ReceiptHandle: m.ReceiptHandle,
 						})
 						if err != nil {
@@ -227,8 +244,12 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 }
 
 func closeAWS(ctx context.Context) {
-	_, err := sqsClient.DeleteQueue(ctx, &sqs.DeleteQueueInput{QueueUrl: &queueURL})
+	_, err := sqsClient.DeleteQueue(ctx, &sqs.DeleteQueueInput{QueueUrl: &botQueueURL})
 	if err != nil {
-		log.Printf("Error deleting queue: %v", err)
+		log.Printf("Error deleting bot-events queue: %v", err)
+	}
+	_, err = sqsClient.DeleteQueue(ctx, &sqs.DeleteQueueInput{QueueUrl: &ragResponseURL})
+	if err != nil {
+		log.Printf("Error deleting RAG_response queue: %v", err)
 	}
 }

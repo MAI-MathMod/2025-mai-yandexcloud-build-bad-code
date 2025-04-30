@@ -76,7 +76,15 @@ func main() {
 				continue
 			}
 
-			// Получаем имя пользователя
+			if isMediaMessage(update.Message) {
+				msg := tgbotapi.NewMessage(
+					update.Message.Chat.ID,
+					"⚠️ Я принимаю только текстовые сообщения. Пожалуйста, отправьте текст.",
+				)
+				bot.Send(msg)
+				continue
+			}
+
 			username := "Anonymous"
 			if update.Message.From != nil && update.Message.From.UserName != "" {
 				username = update.Message.From.UserName
@@ -245,6 +253,17 @@ func startConsumers(ctx context.Context, bot *tgbotapi.BotAPI) {
 			}
 		}()
 	}
+}
+
+func isMediaMessage(msg *tgbotapi.Message) bool {
+	return msg.Photo != nil ||
+		msg.Video != nil ||
+		msg.Document != nil ||
+		msg.Audio != nil ||
+		msg.Voice != nil ||
+		msg.VideoNote != nil ||
+		msg.Sticker != nil ||
+		msg.Location != nil
 }
 
 func closeAWS(ctx context.Context) {

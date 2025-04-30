@@ -95,6 +95,10 @@ func main() {
 				Text:   update.Message.Text,
 			}
 
+			if checkCommand(ev, bot) {
+				continue
+			}
+
 			input := &sqs.SendMessageInput{
 				QueueUrl:       &botQueueURL,
 				MessageBody:    aws.String(ev.Text),
@@ -264,6 +268,15 @@ func isMediaMessage(msg *tgbotapi.Message) bool {
 		msg.VideoNote != nil ||
 		msg.Sticker != nil ||
 		msg.Location != nil
+}
+
+func checkCommand(event *BotEvent, bot *tgbotapi.BotAPI) bool {
+	switch event.Text {
+	case "/start", "Перевод на оператора":
+		HandleUpdate(bot, *event)
+		return true
+	}
+	return false
 }
 
 func closeAWS(ctx context.Context) {

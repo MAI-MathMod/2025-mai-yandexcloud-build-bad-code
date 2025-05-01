@@ -91,12 +91,79 @@ class Assistant:
         if chat_id not in self.active_chats:
             self.active_chats[chat_id] = Chat(system_prompt=ASSISTENT_SYSTEM_PROMT)
             logger.info(f"Created new chat for chat_id: {chat_id}")
-        return self.active_chats[chat_id]
+        return chat_id
+
+    # def ask(self, chat_id: str, message: str) -> str:
+    #     """Обрабатывает запрос пользователя в указанном чате"""
+    #     logger.info(f"Received message from chat_id {chat_id}: {message[:50]}...")
+        
+    #     # Получаем или создаем чат
+    #     chat = self.active_chats.get(chat_id)
+    #     if chat is None:
+    #         chat = self.create_chat(chat_id)
+        
+    #     # Очистка сообщения
+    #     refined_message = self.refiner(message)
+    #     logger.info(f"Refined message: {refined_message}")
+
+    #     # Запись в историю чата
+    #     chat.write(refined_message)
+    #     logger.info("Message added to chat history")
+
+    #     # Проверка уточняющих вопросов
+    #     if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
+    #         check = self.checker(f"ВОПРОС(Ы): {chat.clarifying_questions}\nОТВЕТ: {message}")
+    #         if '[YES]' in check:
+    #             chat.write(check, role='assistant')
+    #             chat.clarifying_questions = None
+    #             chat.write(f"{chat.backtrace_question}\n{message}")
+    #         else:
+    #             return chat.write(check, role='assistant').content
+
+    #     # Получение истории чата
+    #     chat_history = chat.copy().get_history()
+    #     chat_history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in chat_history])
+
+    #     # Удаляем ссылки на контекст
+    #     enriched = self.enricher("\n".join([
+    #         f"{msg.type}: {msg.content}"
+    #         for msg in chat[-7:].remove_system_prompt().get_history()
+    #     ]))
+    #     logger.info(f"Generated enriched request: {enriched}")
+
+    #     # Формируем поисковый запрос
+    #     request = self.requester(enriched)
+    #     logger.info(f"Generated search request: {request}")
+
+    #     if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
+    #         chat.pop()
+    #         chat.backtrace_question = None
+
+    #     # Если не нужно производить поиск
+    #     if request == "None":
+    #         response = chat.ask(self.model)
+    #         logger.info(f"Generated final response: {response.content}")
+    #         return response.content
+        
+    #     # Производим поиск
+    #     docs = '\n\n'.join(self.rag_engine.search(request, n_results=5))
+    #     logger.info(f"Finded docs: {docs[:100]}...")
+    #     try:
+    #         sites = self.search_tool.run(request, n_results=2)
+    #         logger.info(f"Finded sites: {sites}")
+    #     except DuckDuckGoSearchException as e:
+    #         sites = ''
+    #         logger.info(f"No information was found on the Internet: {e}")
+        
+    #     context = f'ДАННЫЕ:\nДОКУМЕНТЫ: {docs}\nСАЙТЫ: {sites}'
+    #     response = self.make_answer(f'{enriched}\n\n{context}')
+    #     logger.info(f"Generated answer: {response}")
+    #     chat.write(response, role='assistant')
+    #     return response
 
     def ask(self, chat_id: str, message: str) -> str:
-        """Обрабатывает запрос пользователя в указанном чате"""
-        logger.info(f"Received message from chat_id {chat_id}: {message[:50]}...")
-        
+        logger.info(f"Received raw message: {message}")
+
         # Получаем или создаем чат
         chat = self.active_chats.get(chat_id)
         if chat is None:
@@ -110,19 +177,42 @@ class Assistant:
         chat.write(refined_message)
         logger.info("Message added to chat history")
 
-        # Проверка уточняющих вопросов
-        if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
-            check = self.checker(f"ВОПРОС(Ы): {chat.clarifying_questions}\nОТВЕТ: {message}")
-            if '[YES]' in check:
-                chat.write(check, role='assistant')
-                chat.clarifying_questions = None
-                chat.write(f"{chat.backtrace_question}\n{message}")
-            else:
-                return chat.write(check, role='assistant').content
+        # if self.backtrace_question is not None:
+        #     check = self.checker(f"ВОПРОС(Ы): {self.clarifying_questions}\nОТВЕТ: {message}")
+        #     if '[YES]' in check:
+        #         chat.write(check, role='assistant')
+        #         self.clarifying_questions = None
+        #         chat.write(f"{self.backtrace_question}\n{message}")
+        #     else:
+        #         return chat.write(check, role='assistant').content
 
         # Получение истории чата
         chat_history = chat.copy().get_history()
         chat_history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in chat_history])
+        logger.info(f"Chat history:\n{chat_history_str}")
+
+        # Саммаризация истории
+        # summary_message = self.summary(chat_history_str)
+        # chat.pop()
+        # chat.write(summary_message)
+        # logger.info(f"Summary generated: {summary_message}")
+
+        # Генерация уточняющих вопросов
+        # if self.backtrace_question is None:
+        #     questions = '\n'.join(self.proactivity(chat_history_str))
+        #     logger.info(f"Generated proactive questions: {questions}")
+
+        #     if questions:
+        #         # self.backtrace_question = summary_message
+        #         self.backtrace_question = refined_message
+        #         self.clarifying_questions = questions
+        #         logger.info("Backtrace question set")
+                
+        #         fr = self.friendly_questions(f'{refined_message}\n{questions}')
+        #         logger.info(f"Generated friendly response: {fr}")
+        #         return chat.write(fr).content
+            
+        #     logger.info("No proactive questions generated, proceeding to direct response")
 
         # Удаляем ссылки на контекст
         enriched = self.enricher("\n".join([
@@ -135,9 +225,9 @@ class Assistant:
         request = self.requester(enriched)
         logger.info(f"Generated search request: {request}")
 
-        if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
-            chat.pop()
-            chat.backtrace_question = None
+        # if self.backtrace_question is not None:
+        #     chat.pop();
+        #     self.backtrace_question = None
 
         # Если не нужно производить поиск
         if request == "None":
@@ -146,16 +236,14 @@ class Assistant:
             return response.content
         
         # Производим поиск
-        docs = '\n\n'.join(self.rag_engine.search(request, n_results=5))
-        logger.info(f"Finded docs: {docs[:100]}...")
+        docs = '\n'.join(self.rag_engine.search(request, n_results=4))
         try:
-            sites = self.search_tool.run(request, n_results=2)
-            logger.info(f"Finded sites: {sites}")
+            sites = self.search_tool.run(request, n_results=3)
         except DuckDuckGoSearchException as e:
             sites = ''
             logger.info(f"No information was found on the Internet: {e}")
         
-        context = f'ДАННЫЕ:\nДОКУМЕНТЫ: {docs}\nСАЙТЫ: {sites}'
+        context = f'ДАННЫЕ:\n{docs}\n{sites}'
         response = self.make_answer(f'{enriched}\n\n{context}')
         logger.info(f"Generated answer: {response}")
         chat.write(response, role='assistant')

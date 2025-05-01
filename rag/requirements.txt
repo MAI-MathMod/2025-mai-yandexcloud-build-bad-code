@@ -9,3 +9,4 @@ langchain-community
 chromadb
 langchain-chroma
 duckduckgo-search
+boto3

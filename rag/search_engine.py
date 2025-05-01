@@ -1,4 +1,5 @@
-from langchain_chroma import Chroma  # Изменённый импорт
+from langchain.retrievers import EnsembleRetriever
+from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -6,8 +7,20 @@ from typing import List, Optional, Dict
 from yandex_cloud_ml_sdk import YCloudML
 import os
 import glob
+from tqdm import tqdm
 from bs4 import BeautifulSoup
 from utils import get_environment_variables
+from langchain_community.retrievers import BM25Retriever
+from langchain.vectorstores.base import VectorStoreRetriever
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import itertools
+
+class AsymmetricRetriever(VectorStoreRetriever):
+    query_embedding_function: callable
+
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+        query_vector = self.query_embedding_function(query)
+        return self.vectorstore.similarity_search_by_vector(query_vector, k=self.search_kwargs.get("k", 5))
 
 class SearchEngine:
     def __init__(
@@ -40,25 +53,56 @@ class SearchEngine:
         with open(file_path, 'r', encoding='utf-8') as file:
             return file.read()
     
-    def _load_documents(self) -> List[str]:
-        """Рекурсивно загружает документы из различных форматов файлов"""
-        documents = []
-        
-        # Поддерживаемые форматы файлов
-        extensions = ['*.txt', '*.csv', '*.md']
-        
-        for ext in extensions:
-            for file_path in glob.glob(os.path.join(self.data_folder, '**', ext), recursive=True):
+    def _process_file(self, args):
+        """Читает файл и сразу возвращает его чанки."""
+        file_path, chunk_size, chunk_overlap = args
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            print(f"Ошибка чтения {file_path}: {e}")
+            return []
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        # split_documents ожидает список Document
+        docs = splitter.split_documents([Document(page_content=content)])
+        return docs
+
+    def _load_documents(self) -> List[Document]:
+        """Загружает и сплитит файлы параллельно."""
+        extensions = ['*.txt', '*.csv', '*.md', '*.html', '*.json']
+        all_files = list(itertools.chain.from_iterable(
+            glob.glob(os.path.join(self.data_folder, '**', ext), recursive=True)
+            for ext in extensions
+        ))
+
+        chunks: List[Document] = []
+        total = len(all_files)
+        print(f"Найдено файлов: {total}")
+
+        # Подготовим аргументы для каждого процесса
+        args_list = [
+            (fp, self.chunk_size, self.chunk_overlap)
+            for fp in all_files
+        ]
+
+        # Пул процессов
+        with ProcessPoolExecutor() as executor:
+            futures = {executor.submit(self._process_file, args): args[0] for args in args_list}
+            for i, future in enumerate(as_completed(futures), start=1):
+                file_path = futures[future]
                 try:
-                    content = self._load_text_file(file_path)
-                    documents.append(Document(content))
+                    docs = future.result()
+                    chunks.extend(docs)
                 except Exception as e:
-                    print(f"Ошибка при обработке файла {file_path}: {e}")
-        
-        # Разбиваем документы на чанки
-        if documents:
-            return self.text_splitter.split_documents(documents)
-        return []
+                    print(f"Ошибка при обработке {file_path}: {e}")
+                print(f'Processed {i}/{total} files', end='\r')
+
+        print(f"\nВсего чанков: {len(chunks)}")
+        return chunks
     
     def _initialize_vectorstore(self, documents: List[Document]):
         """Инициализирует Chroma с документами"""
@@ -71,22 +115,12 @@ class SearchEngine:
             persist_directory=self.persist_directory,
             metadatas=metadatas
         )
-
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 1},
-            embedding_function=self.query_embeddings.embed_query  # Переопределяем для поиска
-        )
     
     def _load_existing_vectorstore(self):
         """Загружает существующую базу Chroma"""
         self.vectorstore = Chroma(
             persist_directory=self.persist_directory,
             embedding_function=self.doc_embeddings
-        )
-
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 1},
-            embedding_function=self.query_embeddings.embed_query  # Переопределяем для поиска
         )
     
     def initialize(self):
@@ -99,19 +133,39 @@ class SearchEngine:
                 raise ValueError("Не найдено документов для индексации")
         else:
             self._load_existing_vectorstore()
+        
+        # Настройка ретриверов
+        data = self.vectorstore.get()
+        texts = data['documents']
+        
+        # Создание BM25 ретривера
+        bm25_retriever = BM25Retriever.from_texts(texts)
+        bm25_retriever.k = 5
+        
+        # Создание Chroma ретривера с асимметричными эмбеддингами
+        chroma_retriever = AsymmetricRetriever(
+            vectorstore=self.vectorstore,
+            query_embedding_function=self.query_embeddings.embed_query,
+            search_kwargs={"k": 5}
+        )
+        
+        # Создание EnsembleRetriever
+        ensemble_retriever = EnsembleRetriever(retrievers=[chroma_retriever, bm25_retriever])
+        
+        # Установка self.retriever
+        self.retriever = ensemble_retriever
     
-    def search(self, query: str, n_results: int = 5) -> List[Document]:
+    def search(self, query: str, n_results: int = 5) -> List[str]:
         """
         Выполняет поиск по документам
         
         :param query: Поисковый запрос
-        :return: Список релевантных документов
+        :return: Список релевантных текстов документов
         """
-
         if self.retriever is None:
             self.initialize()
-        self.retriever.search_kwargs['k'] = n_results
-        return [d.page_content for d in self.retriever.invoke(query)]  # Используем invoke вместо get_relevant_documents
+        docs = self.retriever.invoke(query)
+        return [d.page_content for d in docs[:n_results]]
 
 class YandexAsymmetricEmbeddings(Embeddings):
     def __init__(self, sdk: YCloudML, mode: str = "doc"):
@@ -145,19 +199,9 @@ if __name__ == "__main__":
     )
     search_engine.initialize()
     
+    print('searching....')
     # Пример поиска
-    results = search_engine.search("Какие проходные баллы были на прикладную математику и информатику в 2024 году?", n_results=1)
+    results = search_engine.search("Какие проходные баллы были на прикладную математику в 2024 году?", n_results=6)
     for doc in results:
         print('-' * 50)
         print(doc)
-
-
-
-
-
-
-
-
-
-
-

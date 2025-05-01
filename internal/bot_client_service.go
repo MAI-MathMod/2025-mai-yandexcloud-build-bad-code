@@ -28,17 +28,37 @@ func handleUpdate(bot *tgbotapi.BotAPI, event BotEvent) {
 
 	switch event.Text {
 	case "/start":
-		msg = tgbotapi.NewMessage(event.ChatID, "🎓 Добро пожаловать в чат-бот приёмной комиссии МАИ! Я помогу вам разобраться с поступлением: расскажу про направления, документы, общежитие, сроки и многое другое. Задавайте свой вопрос — я всегда на связи! Если не смогу помочь сам, подскажу, куда обратиться.")
+		text := `🎓 Добро пожаловать в чат-бот приёмной комиссии МАИ\! 
+Я помогу вам разобраться с поступлением: расскажу про направления, документы, общежитие, сроки и многое другое\. 
+Задавайте свой вопрос — я всегда на связи\! 
+Если не смогу помочь сам, подскажу, куда обратиться\.`
+
+		msg = tgbotapi.NewMessage(event.ChatID, text)
 		msg.ReplyMarkup = GetMainKeyboard()
+		msg.ParseMode = "MarkdownV2"
 	default:
-		msg = tgbotapi.NewMessage(event.ChatID, event.Text)
-		msg.ReplyMarkup = GetMainKeyboard()
+		if event.Text != "" {
+			msg = tgbotapi.NewMessage(event.ChatID, event.Text)
+			msg.ReplyMarkup = GetMainKeyboard()
+			msg.ParseMode = ""
+		}
 	}
 
-	msg.ParseMode = "Markdown"
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Error sending message: %v", err)
+	if msg.Text != "" {
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("[ERROR] ChatID: %d | Failed to send: %q | Error: %v",
+				event.ChatID,
+				truncateText(msg.Text, 50),
+				err)
+		}
 	}
+}
+
+func truncateText(text string, length int) string {
+	if len(text) > length {
+		return text[:length] + "..."
+	}
+	return text
 }
 
 func handleOperatorTransfer(event *BotEvent, bot *tgbotapi.BotAPI) {

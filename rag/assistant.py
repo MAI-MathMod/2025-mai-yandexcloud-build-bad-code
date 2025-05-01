@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -10,9 +11,8 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
 from langchain_core.runnables import RunnablePassthrough
 from yandex_cloud_ml_sdk import YCloudML
-from typing import List, Dict
-
 from typing import List
+
 from langchain_community.vectorstores import Chroma
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -23,7 +23,6 @@ from prompts import (
     QUERY_REFINER_PROMPT,
     PROACTIVE_ASSISTANT_PROMPT,
     PROACTIVE_FRIENDLY_QUESTIONS,
-    # SUMMARIZE,
     ASSISTENT_SYSTEM_PROMT,
     ENRICHER,
     REQUEST_TO_RAG,
@@ -42,7 +41,6 @@ def setup_logger():
     logger = logging.getLogger("AssistantLogger")
     logger.setLevel(logging.INFO)
     
-    # Явно указываем кодировку UTF-8 при создании файлового обработчика
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     
@@ -55,28 +53,21 @@ class Assistant:
     def __init__(self, sdk):
         self.model = sdk.models.completions('yandexgpt').langchain()
         self.rag_engine = SearchEngine(
-            data_folder="./data",  # Папка с документами
+            data_folder="./data",
             sdk=sdk,
             persist_directory="./chroma_db",
-            chunk_size=800,  # Можно настроить под наши нужды
+            chunk_size=800,
             chunk_overlap=100
         )
         self.rag_engine.initialize()
         self.search_tool = DuckDuckGoSearchRun()
-        self.chat = Chat(system_prompt=ASSISTENT_SYSTEM_PROMT)
-        self.backtrace_question = None
-        self.clarifying_questions = None
-        
+        self.active_chats: Dict[str, Chat] = {}  # Словарь для хранения чатов по chat_id
         logger.info("Assistant initialized with model: yandexgpt")
 
-        # Делаем тулзы
-        # 1. Очиститель (своеобразный Т9, а также защита от промпт-инъекций)
+        # Инициализация инструментов
         self.refiner = make_ai_tool(self.model, QUERY_REFINER_PROMPT)
-        logger.info("Refiner tool initialized")
-
-        # 2. Проактивизм. Уточняем запрос
+        
         def _parse_questions(response: str) -> List[str]:
-            """Извлекает вопросы из ответа модели"""
             questions = []
             if not response.startswith("None"):
                 for line in response.split('\n'):
@@ -85,78 +76,58 @@ class Assistant:
                         question = line.split('.', 1)[1].strip()
                         questions.append(question)
             return questions
+        
         self.proactivity = make_ai_tool(self.model, PROACTIVE_ASSISTANT_PROMPT, _parse_questions)
         self.friendly_questions = make_ai_tool(self.model, PROACTIVE_FRIENDLY_QUESTIONS)
-        logger.info("Proactivity tools initialized")
-
-        # # 3. Саммаризация. Чтобы корректно работали тулзы и впринципе собирать всю инфу
-        # self.summary = make_ai_tool(self.model, SUMMARIZE)
-        # logger.info("Summary tool initialized")
-
-        # 3. Обогатитель. Удаляет все ссылки на контекст, чтобы запрос был конкретным
         self.enricher = make_ai_tool(self.model, ENRICHER)
-
-        # 4. Формулироващик поисковых запросов. Универсален и для RAG и для гугла
         self.requester = make_ai_tool(self.model, REQUEST_TO_RAG)
-
-        # 5. Ответ на вопрос.
         self.make_answer = make_ai_tool(self.model, ANALYZE_RAG)
-
-        # 6. Проверка ответов
         self.checker = make_ai_tool(self.model, CHECK_ANSWERS)
+        
+        logger.info("All tools initialized")
 
-    def ask(self, message: str):
-        logger.info(f"Received raw message: {message}")
+    def create_chat(self, chat_id: str) -> Chat:
+        """Создает новый чат для указанного chat_id"""
+        if chat_id not in self.active_chats:
+            self.active_chats[chat_id] = Chat(system_prompt=ASSISTENT_SYSTEM_PROMT)
+            logger.info(f"Created new chat for chat_id: {chat_id}")
+        return self.active_chats[chat_id]
+
+    def ask(self, chat_id: str, message: str) -> str:
+        """Обрабатывает запрос пользователя в указанном чате"""
+        logger.info(f"Received message from chat_id {chat_id}: {message[:50]}...")
+        
+        # Получаем или создаем чат
+        chat = self.active_chats.get(chat_id)
+        if chat is None:
+            chat = self.create_chat(chat_id)
         
         # Очистка сообщения
         refined_message = self.refiner(message)
         logger.info(f"Refined message: {refined_message}")
 
         # Запись в историю чата
-        self.chat.write(refined_message)
+        chat.write(refined_message)
         logger.info("Message added to chat history")
 
-        if self.backtrace_question is not None:
-            check = self.checker(f"ВОПРОС(Ы): {self.clarifying_questions}\nОТВЕТ: {message}")
+        # Проверка уточняющих вопросов
+        if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
+            check = self.checker(f"ВОПРОС(Ы): {chat.clarifying_questions}\nОТВЕТ: {message}")
             if '[YES]' in check:
-                self.chat.write(check, role='assistant')
-                self.clarifying_questions = None
-                self.chat.write(f"{self.backtrace_question}\n{message}")
+                chat.write(check, role='assistant')
+                chat.clarifying_questions = None
+                chat.write(f"{chat.backtrace_question}\n{message}")
             else:
-                return self.chat.write(check, role='assistant').content
+                return chat.write(check, role='assistant').content
 
         # Получение истории чата
-        chat_history = self.chat.copy().get_history()
+        chat_history = chat.copy().get_history()
         chat_history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in chat_history])
-        logger.info(f"Chat history:\n{chat_history_str}")
-
-        # Саммаризация истории
-        # summary_message = self.summary(chat_history_str)
-        # self.chat.pop()
-        # self.chat.write(summary_message)
-        # logger.info(f"Summary generated: {summary_message}")
-
-        # Генерация уточняющих вопросов
-        # if self.backtrace_question is None:
-        #     questions = '\n'.join(self.proactivity(chat_history_str))
-        #     logger.info(f"Generated proactive questions: {questions}")
-
-        #     if questions:
-        #         # self.backtrace_question = summary_message
-        #         self.backtrace_question = refined_message
-        #         self.clarifying_questions = questions
-        #         logger.info("Backtrace question set")
-                
-        #         fr = self.friendly_questions(f'{refined_message}\n{questions}')
-        #         logger.info(f"Generated friendly response: {fr}")
-        #         return self.chat.write(fr).content
-            
-        #     logger.info("No proactive questions generated, proceeding to direct response")
 
         # Удаляем ссылки на контекст
         enriched = self.enricher("\n".join([
             f"{msg.type}: {msg.content}"
-            for msg in self.chat[-7:].remove_system_prompt().get_history()
+            for msg in chat[-7:].remove_system_prompt().get_history()
         ]))
         logger.info(f"Generated enriched request: {enriched}")
 
@@ -164,19 +135,19 @@ class Assistant:
         request = self.requester(enriched)
         logger.info(f"Generated search request: {request}")
 
-        if self.backtrace_question is not None:
-            self.chat.pop();
-            self.backtrace_question = None
+        if hasattr(chat, 'backtrace_question') and chat.backtrace_question is not None:
+            chat.pop()
+            chat.backtrace_question = None
 
         # Если не нужно производить поиск
         if request == "None":
-            response = self.chat.ask(self.model)
+            response = chat.ask(self.model)
             logger.info(f"Generated final response: {response.content}")
             return response.content
         
         # Производим поиск
         docs = '\n\n'.join(self.rag_engine.search(request, n_results=5))
-        logger.info(f"Finded docs: {docs}")
+        logger.info(f"Finded docs: {docs[:100]}...")
         try:
             sites = self.search_tool.run(request, n_results=2)
             logger.info(f"Finded sites: {sites}")
@@ -187,7 +158,7 @@ class Assistant:
         context = f'ДАННЫЕ:\nДОКУМЕНТЫ: {docs}\nСАЙТЫ: {sites}'
         response = self.make_answer(f'{enriched}\n\n{context}')
         logger.info(f"Generated answer: {response}")
-        self.chat.write(response, role='assistant')
+        chat.write(response, role='assistant')
         return response
 
 
@@ -202,14 +173,26 @@ if __name__ == '__main__':
     assistant = Assistant(sdk)
     print(' ' * 27, end='\r')
 
+    # Пример использования с разными чатами
+    chat_id1 = "user123"
+    chat_id2 = "user456"
+
+    # Создаем чаты
+    assistant.create_chat(chat_id1)
+    assistant.create_chat(chat_id2)
+
     while True:
         try:
-            message = input('user: ')
-            response = assistant.ask(message)
-            print(f'assistant: {response}')
+            # Эмулируем запросы от разных пользователей
+            user_input = input('Введите chat_id и сообщение (формат: chat_id|message): ')
+            if '|' not in user_input:
+                print("Неверный формат. Используйте: chat_id|message")
+                continue
+                
+            chat_id, message = user_input.split('|', 1)
+            response = assistant.ask(chat_id, message)
+            print(f'assistant ({chat_id}): {response}')
         except Exception as e:
             logger.error(f"Error occurred: {str(e)}", exc_info=True)
-            # print(f'Error occured: {e}')
-            # print('Goodbye!')
-            # break
-            raise e
+            print(f'Error occurred: {e}')
+            break

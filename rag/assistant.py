@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -65,7 +66,12 @@ class Assistant:
         logger.info("Assistant initialized with model: yandexgpt")
 
         # Инициализация инструментов
-        self.refiner = make_ai_tool(self.model, QUERY_REFINER_PROMPT)
+        def postprocess_refiner(msg):
+            if msg == 'В интернете есть много сайтов с информацией на эту тему. [Посмотрите, что нашлось в поиске](https://ya.ru)':
+                return 'Я хочу поступить в Бауманку'
+            return msg
+
+        self.refiner = make_ai_tool(self.model, QUERY_REFINER_PROMPT, postprocess_refiner)
         
         def _parse_questions(response: str) -> List[str]:
             questions = []
@@ -167,7 +173,8 @@ class Assistant:
         # Получаем или создаем чат
         chat = self.active_chats.get(chat_id)
         if chat is None:
-            chat = self.create_chat(chat_id)
+            self.create_chat(chat_id)
+            chat = self.active_chats.get(chat_id)
         
         # Очистка сообщения
         refined_message = self.refiner(message)
@@ -236,19 +243,51 @@ class Assistant:
             return response.content
         
         # Производим поиск
-        docs = '\n'.join(self.rag_engine.search(request, n_results=4))
-        try:
-            sites = self.search_tool.run(request, n_results=3)
-        except DuckDuckGoSearchException as e:
-            sites = ''
-            logger.info(f"No information was found on the Internet: {e}")
+        # docs = self.ask_with_refinement(chat_id, request)
+        docs = '\n---\n'.join(self.rerank_documents(enriched, self.rag_engine.search(request, n_results=8)))
+        logger.info(f"Finded docs: {docs}")
         
-        context = f'ДАННЫЕ:\n{docs}\n{sites}'
+        # try:
+            # sites = self.search_tool.run(request, n_results=3)
+            # logger.info(f"Finded sites: {sites}")
+        # except DuckDuckGoSearchException as e:
+        #     sites = ''
+        #     logger.info(f"No information was found on the Internet: {e}")
+        
+        # context = f'ДАННЫЕ:\n{docs}\n{sites}'
+        context = f'КОНТЕКСТ:\n\n{docs}'
         response = self.make_answer(f'{enriched}\n\n{context}')
         logger.info(f"Generated answer: {response}")
         chat.write(response, role='assistant')
         return response
 
+    def rerank_documents(self, question: str, documents: list[str], top_n: int = 3) -> list[str]:
+        """
+        Реранжирует документы по релевантности вопросу
+        :param question: текущий вопрос
+        :param documents: список документов
+        :param top_n: количество возвращаемых документов
+        :return: топ-N наиболее релевантных документов
+        """
+        ranked = []
+        for doc in documents:
+            prompt = f"""Оцени релевантность документа вопросу от 0 до 100. Ответь только числом.
+            
+            Вопрос: {question}
+            Документ: {doc}
+            """
+            try:
+                current_response = self.model.invoke(prompt).content
+                numbers = re.findall(r'\d+', current_response)
+                score = int(numbers[0]) if numbers else 0
+                ranked.append((score, doc))
+            except Exception as e:
+                print(e)
+                continue
+        
+        # Сортируем по убыванию оценки и берем топ-N
+        ranked.sort(reverse=True, key=lambda x: x[0])
+        return [doc for _, doc in ranked[:top_n]]
 
 if __name__ == '__main__':
     folder_id, api_key = get_environment_variables()
@@ -283,4 +322,5 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Error occurred: {str(e)}", exc_info=True)
             print(f'Error occurred: {e}')
+            raise e
             break

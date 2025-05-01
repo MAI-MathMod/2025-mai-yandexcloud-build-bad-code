@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -15,42 +16,17 @@ type BotEvent struct {
 func GetMainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("FAQ"),
-			tgbotapi.NewKeyboardButton("Как пользоваться"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("Перевод на оператора"),
 		),
 	)
 }
 
-func GetFAQKeyboard() tgbotapi.InlineKeyboardMarkup {
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 1; i <= 10; i++ {
-		btn := tgbotapi.NewInlineKeyboardButtonData(
-			"Вопрос "+string(rune('0'+i)),
-			"question_"+string(rune('0'+i)),
-		)
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-	}
-	return tgbotapi.NewInlineKeyboardMarkup(rows...)
-}
-
-func HandleUpdate(bot *tgbotapi.BotAPI, event BotEvent) {
+func handleUpdate(bot *tgbotapi.BotAPI, event BotEvent) {
 	var msg tgbotapi.MessageConfig
 
 	switch event.Text {
 	case "/start":
-		msg = tgbotapi.NewMessage(event.ChatID, "Добро пожаловать! Выберите раздел:")
-		msg.ReplyMarkup = GetMainKeyboard()
-	case "FAQ":
-		msg = tgbotapi.NewMessage(event.ChatID, "Выберите вопрос:")
-		msg.ReplyMarkup = GetFAQKeyboard()
-	case "Как пользоваться":
-		msg = tgbotapi.NewMessage(event.ChatID, "Инструкция по использованию сервиса...")
-		msg.ReplyMarkup = GetMainKeyboard()
-	case "Перевод на оператора":
-		msg = tgbotapi.NewMessage(event.ChatID, "Переводим на оператора")
+		msg = tgbotapi.NewMessage(event.ChatID, "Здравствуйте! Я являюсь AI ассистентом приёмной комиссии Московского Авиационного Института, готов ответить на ваши вопросы, связанные с поступлением в Московский авиационный институт. Чем я могу вам помочь?")
 		msg.ReplyMarkup = GetMainKeyboard()
 	default:
 		msg = tgbotapi.NewMessage(event.ChatID, event.Text)
@@ -60,5 +36,29 @@ func HandleUpdate(bot *tgbotapi.BotAPI, event BotEvent) {
 	msg.ParseMode = "Markdown"
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
+	}
+}
+
+func handleOperatorTransfer(event *BotEvent, bot *tgbotapi.BotAPI) {
+	link := os.Getenv("OPERATOR_LINK")
+	if link == "" {
+		msg := tgbotapi.NewMessage(event.ChatID, "⚠️ Оператор временно недоступен")
+		bot.Send(msg)
+		return
+	}
+
+	msg := tgbotapi.NewMessage(
+		event.ChatID,
+		"Наши специалисты готовы помочь вам в этом чате:",
+	)
+
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL("Чат с оператором", link),
+		),
+	)
+
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send operator transfer message: %v", err)
 	}
 }

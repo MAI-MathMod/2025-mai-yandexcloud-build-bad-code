@@ -5,6 +5,7 @@ from utils import get_environment_variables
 import os
 from typing import Dict
 from datetime import datetime
+from yandex_cloud_ml_sdk import YCloudML
 
 def main() -> None:
     """Главная функция ассистента приёмной комиссии МАИ"""
@@ -39,15 +40,12 @@ def main() -> None:
         
         # Инициализация ассистента
         print("\n🔄 Инициализация AI-ассистента МАИ...", end='\r', flush=True)
-        assistant = Assistant(
-            folder_id=folder_id,
-            api_key=api_key,
-            log_dir="logs"
-        )
+        sdk = YCloudML(folder_id=folder_id, auth=api_key)
+        assistant = Assistant(sdk)
         print(" " * 50, end='\r')
         
         # Словарь активных чатов
-        active_chats: Dict[int, Assistant.Chat] = {}
+        active_chats: set = set()
         
         print("\n✅ Ассистент готов к работе. Ожидание сообщений...\n")
         
@@ -92,14 +90,13 @@ def main() -> None:
 
                 # Логирование нового пользователя
                 if chat_id not in active_chats:
-                    active_chats[chat_id] = assistant.create_chat()
+                    active_chats.add(assistant.create_chat(chat_id))
                     print(f"\n🌟 [{datetime.now().strftime('%H:%M:%S')}] Новый пользователь: {username} (ID: {chat_id})")
                 
                 # Обработка запроса
-                chat = active_chats[chat_id]
                 print(f"\n💬 [{datetime.now().strftime('%H:%M:%S')}] Запрос от {username}: {user_message[:50]}...")
                 
-                assistant_response = chat.ask(user_message)
+                assistant_response = assistant.ask(chat_id, user_message)
                 print(f"📨 [{datetime.now().strftime('%H:%M:%S')}] Ответ для {username}: {assistant_response[:50]}...")
                 
                 # Отправка ответа
@@ -128,8 +125,8 @@ def main() -> None:
             except KeyboardInterrupt:
                 print("\n🛑 Завершение работы...")
                 # Закрытие всех чатов
-                for cid, chat in active_chats.items():
-                    chat.close()
+                # for cid in active_chats:
+                #     chat.close()
                 break
             
             except Exception as e:

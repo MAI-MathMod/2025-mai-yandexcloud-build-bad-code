@@ -1,0 +1,12 @@
+scipy
+python-dotenv
+numpy
+unstructured
+yandex-cloud-ml-sdk
+yandex-cloud-ml-sdk[langchain]
+langchain
+langchain-community
+chromadb
+langchain-chroma
+duckduckgo-search
+boto3

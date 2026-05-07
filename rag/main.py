@@ -1,18 +1,16 @@
 import sys
 import boto3
-from assistant import Assistant
-from utils import get_environment_variables
 import os
-from typing import Dict
 from datetime import datetime
-from yandex_cloud_ml_sdk import YCloudML
+
+try:
+    from .assistant import build_assistant_from_env
+except ImportError:
+    from assistant import build_assistant_from_env
 
 def main() -> None:
     """Главная функция ассистента приёмной комиссии МАИ"""
     try:
-        # Получение переменных окружения
-        folder_id, api_key = get_environment_variables()
-        
         # Инициализация клиента YMQ
         yc_access_id = os.getenv('YC_SERVICE_ACCESS_ID')
         yc_access_key = os.getenv('YC_ACCESS_KEY')
@@ -39,9 +37,8 @@ def main() -> None:
             raise ValueError("URL очередей не найдены в переменных окружения")
         
         # Инициализация ассистента
-        print("\n🔄 Инициализация AI-ассистента МАИ...", end='\r', flush=True)
-        sdk = YCloudML(folder_id=folder_id, auth=api_key)
-        assistant = Assistant(sdk)
+        print("\n🔄 Инициализация agentic-ассистента МАИ...", end='\r', flush=True)
+        assistant = build_assistant_from_env()
         print(" " * 50, end='\r')
         
         # Словарь активных чатов

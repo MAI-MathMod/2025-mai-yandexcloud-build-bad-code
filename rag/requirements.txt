@@ -10,3 +10,6 @@ chromadb
 langchain-chroma
 duckduckgo-search
 boto3
+qdrant-client
+ragas
+pytest

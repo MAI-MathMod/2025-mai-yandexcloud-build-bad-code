@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from yandex_cloud_ml_sdk import YCloudML
-from typing import List, Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages.base import BaseMessage
 from utils import get_environment_variables
 
 

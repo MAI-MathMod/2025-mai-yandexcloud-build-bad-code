@@ -1,7 +1,11 @@
 import os
 import sys
 from typing import Optional
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv(*args, **kwargs):
+        return False
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 

@@ -1,0 +1,18 @@
+{
+  "description": "Allowed university domains for incremental crawling and RAG source refresh.",
+  "domains": [
+    "priem.mai.ru",
+    "mai.ru",
+    "study.mai.ru",
+    "cabinet.mai.ru",
+    "lk.mai.ru",
+    "www.mai.ru",
+    "pk.mai.ru",
+    "priemka.mai.ru",
+    "int.mai.ru",
+    "en.mai.ru",
+    "postupay.mai.ru",
+    "abit.mai.ru"
+  ]
+}
+

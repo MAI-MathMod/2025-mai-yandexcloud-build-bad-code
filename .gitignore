@@ -60,6 +60,10 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+*.sqlite
+*.sqlite-journal
+rag/data/local_vector_store.json
+rag/data/.index_state.json
 
 # Flask stuff:
 instance/

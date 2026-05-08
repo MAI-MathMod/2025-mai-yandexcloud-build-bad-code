@@ -28,16 +28,18 @@ class ToolRegistry:
     def __init__(self, tools: list[Tool]):
         self._tools = {tool.name: tool for tool in tools}
 
-    def specs_for_prompt(self) -> str:
-        specs = [
+    def schemas_for_model(self) -> list[dict[str, Any]]:
+        return [
             {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
             }
             for tool in self._tools.values()
         ]
-        return json.dumps(specs, ensure_ascii=False, indent=2)
 
     def call(self, name: str, arguments: dict[str, Any]) -> str:
         if name not in self._tools:

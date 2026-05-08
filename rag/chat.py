@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from yandex_cloud_ml_sdk import YCloudML
+import os
 from typing import Dict, List, Literal, Optional, Union
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.base import BaseMessage
-from utils import get_environment_variables
+
+try:
+    from .utils import get_environment_variables
+except ImportError:
+    from utils import get_environment_variables
 
 
 class Chat:
@@ -66,15 +70,22 @@ class Chat:
             return copy
 
 if __name__ == '__main__':
-    folder_id, api_key = get_environment_variables()
+    from langchain_openai import ChatOpenAI
 
-    # Инициализация Yandex Cloud ML
-    sdk = YCloudML(folder_id=folder_id, auth=api_key)
-    sdk.setup_default_logging()
+    folder_id, api_key = get_environment_variables()
 
     chat = Chat('Ты - работник приёмной комиссии Московского Авиационного института, помогаешь студентам с вопросами по поступлению')
     chat.write('Привет, что расскажешь про ваш вуз?')
 
     print('asking...')
-    model = sdk.models.completions('yandexgpt').langchain()
+    model_name = os.getenv("YC_MODEL_NAME", "yandexgpt-5-pro/latest")
+    if not model_name.startswith("gpt://"):
+        model_name = f"gpt://{folder_id}/{model_name}"
+    model = ChatOpenAI(
+        model=model_name,
+        api_key=api_key,
+        base_url="https://ai.api.cloud.yandex.net/v1",
+        default_headers={"OpenAI-Project": folder_id},
+        max_tokens=1500,
+    )
     print(chat.ask(model))

@@ -25,7 +25,6 @@ class SearchEngine:
     def __init__(
         self,
         data_folder: str,
-        sdk=None,
         persist_directory: str = "./chroma_db",
         chunk_size: int = 6000,
         chunk_overlap: int = 600,

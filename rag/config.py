@@ -42,7 +42,7 @@ class AssistantConfig:
         return cls(
             folder_id=os.getenv("folder_id") or os.getenv("YC_FOLDER_ID"),
             api_key=os.getenv("api_key") or os.getenv("YC_API_KEY"),
-            yandex_model_name=os.getenv("YC_MODEL_NAME", "yandexgpt-5-pro"),
+            yandex_model_name=os.getenv("YC_MODEL_NAME", "yandexgpt-5-pro/latest"),
             embedding_model_name=os.getenv("EMBEDDING_MODEL_NAME", "jina-embeddings-v3"),
             data_dir=data_dir,
             qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),

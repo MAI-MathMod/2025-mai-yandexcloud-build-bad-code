@@ -50,7 +50,7 @@ user-1|У меня 260 баллов ЕГЭ. Куда я могу пройти?
 ```env
 YC_FOLDER_ID=...
 YC_API_KEY=...
-YC_MODEL_NAME=yandexgpt-5-pro
+YC_MODEL_NAME=yandexgpt-5-pro/latest
 JINA_API_KEY=...
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=mai_admissions_kb
@@ -74,11 +74,15 @@ Compose поднимает:
 
 ## Function Calling
 
-Агент получает JSON-описание инструментов и выбирает вызовы:
+Агент передаёт схемы инструментов в нативный `ChatOpenAI.bind_tools()` и читает
+вызовы из `AIMessage.tool_calls`:
 
 - `rag_search` — локальный RAG по очищенному индексу;
 - `admissions_sql` — безопасный `SELECT` к SQLite или готовый расчёт по `total_score`;
 - `web_search` — fallback в интернет после локального поиска.
+
+Финальный ответ генерируется через `with_structured_output(..., method="json_schema")`
+по строгой схеме с полем `answer`; пользователю возвращается только содержимое поля.
 
 Для вопросов о проходных баллах есть детерминированный fast path: ассистент сразу вызывает SQL-инструмент, не заставляя модель угадывать численные данные.
 

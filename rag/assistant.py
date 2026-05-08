@@ -10,7 +10,7 @@ try:
     from .embeddings import JinaEmbeddingsV3
     from .indexing import IndexingService, build_vector_store
     from .knowledge_base import KnowledgeBase
-    from .llm import OfflineAdmissionsModel, YandexGPTModel
+    from .llm import LangChainYandexGPTModel, OfflineAdmissionsModel
     from .retrieval import HybridRetriever
     from .tools import build_default_tools
 except ImportError:
@@ -20,7 +20,7 @@ except ImportError:
     from embeddings import JinaEmbeddingsV3
     from indexing import IndexingService, build_vector_store
     from knowledge_base import KnowledgeBase
-    from llm import OfflineAdmissionsModel, YandexGPTModel
+    from llm import LangChainYandexGPTModel, OfflineAdmissionsModel
     from retrieval import HybridRetriever
     from tools import build_default_tools
 
@@ -31,9 +31,8 @@ logger = logging.getLogger("mai-admissions-assistant")
 class Assistant:
     """Compatibility facade used by the queue worker and local CLI."""
 
-    def __init__(self, sdk=None, config: AssistantConfig | None = None):
+    def __init__(self, config: AssistantConfig | None = None):
         self.config = config or AssistantConfig.from_env()
-        self.sdk = sdk
         self.admissions_db = AdmissionsDatabase(
             db_path=self.config.sqlite_path,
             csv_dir=self.config.data_dir / "cutoff_points",
@@ -85,26 +84,22 @@ class Assistant:
         return self.indexing.update_changed()
 
     def _build_model(self):
-        if self.sdk is None:
+        if not self.config.folder_id or not self.config.api_key:
             return OfflineAdmissionsModel()
         try:
-            return YandexGPTModel(self.sdk, model_name=self.config.yandex_model_name)
+            return LangChainYandexGPTModel(
+                folder_id=self.config.folder_id,
+                api_key=self.config.api_key,
+                model_name=self.config.yandex_model_name,
+            )
         except Exception as exc:
             logger.warning("YandexGPT init failed, offline fallback enabled: %s", exc)
             return OfflineAdmissionsModel()
 
 
 def build_assistant_from_env() -> Assistant:
-    try:
-        from yandex_cloud_ml_sdk import YCloudML
-    except Exception:
-        return Assistant()
-
     config = AssistantConfig.from_env()
-    if not config.folder_id or not config.api_key:
-        return Assistant(config=config)
-    sdk = YCloudML(folder_id=config.folder_id, auth=config.api_key)
-    return Assistant(sdk=sdk, config=config)
+    return Assistant(config=config)
 
 
 if __name__ == "__main__":

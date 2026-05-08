@@ -22,6 +22,15 @@ def main() -> None:
     mine.add_argument("output_dir", type=Path)
     mine.add_argument("--top-n", type=int, default=200)
     mine.add_argument("--dataset-size", type=int, default=500)
+    mine.add_argument(
+        "--cluster-eps",
+        type=float,
+        default=0.18,
+        help="Maximum cosine distance between neighboring questions",
+    )
+    mine.add_argument("--cluster-min-samples", type=int, default=2)
+    mine.add_argument("--answer-threshold", type=float, default=0.85)
+    mine.add_argument("--answer-window", type=int, default=3)
 
     args = parser.parse_args()
     config = AssistantConfig.from_env()
@@ -39,7 +48,12 @@ def main() -> None:
         chunks = assistant.update_index()
         print(f"Updated RAG index: {chunks} changed chunks")
     elif args.command == "mine-chats":
-        result = ChatMiningPipeline().run(
+        result = ChatMiningPipeline(
+            cluster_eps=args.cluster_eps,
+            cluster_min_samples=args.cluster_min_samples,
+            answer_similarity_threshold=args.answer_threshold,
+            answer_candidate_window=args.answer_window,
+        ).run(
             input_dir=args.input_dir,
             output_dir=args.output_dir,
             top_n=args.top_n,
@@ -53,4 +67,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

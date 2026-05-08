@@ -1,4 +1,5 @@
 scipy
+scikit-learn
 python-dotenv
 numpy
 unstructured

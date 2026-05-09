@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from .admissions_db import AdmissionsDatabase
 from .assistant import build_assistant_from_env
 from .chat_mining import ChatMiningPipeline
 from .config import AssistantConfig
+from .evaluation import EvaluationPipeline
 
 
 def main() -> None:
@@ -31,6 +33,10 @@ def main() -> None:
     mine.add_argument("--cluster-min-samples", type=int, default=2)
     mine.add_argument("--answer-threshold", type=float, default=0.85)
     mine.add_argument("--answer-window", type=int, default=3)
+
+    evaluate = subparsers.add_parser("evaluate", help="Run RAGAS evaluation")
+    evaluate.add_argument("dataset", type=Path)
+    evaluate.add_argument("--output", type=Path)
 
     args = parser.parse_args()
     config = AssistantConfig.from_env()
@@ -63,6 +69,26 @@ def main() -> None:
             f"Extracted {len(result.top_questions)} top questions and "
             f"{len(result.qa_pairs)} QA pairs"
         )
+    elif args.command == "evaluate":
+        missing = [
+            name
+            for name, value in (
+                ("YC_FOLDER_ID", config.folder_id),
+                ("YC_API_KEY", config.api_key),
+                ("JINA_API_KEY", os.getenv("JINA_API_KEY")),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                "Production evaluation requires: " + ", ".join(missing)
+            )
+        assistant = build_assistant_from_env()
+        report = EvaluationPipeline(assistant).run(
+            dataset_path=args.dataset,
+            output_path=args.output,
+        )
+        print(report.as_dict())
 
 
 if __name__ == "__main__":

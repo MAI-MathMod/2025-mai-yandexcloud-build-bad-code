@@ -11,5 +11,5 @@ langchain-chroma
 duckduckgo-search
 boto3
 qdrant-client
-ragas
+ragas==0.3.9
 pytest

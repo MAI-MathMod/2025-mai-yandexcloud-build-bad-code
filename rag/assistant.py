@@ -77,6 +77,13 @@ class Assistant:
     def ask(self, chat_id: str | int, message: str) -> str:
         return self.agent.ask(chat_id, message)
 
+    def ask_with_context(
+        self,
+        chat_id: str | int,
+        message: str,
+    ) -> tuple[str, list[str]]:
+        return self.agent.ask_with_context(chat_id, message)
+
     def rebuild_index(self) -> int:
         return self.indexing.rebuild()
 

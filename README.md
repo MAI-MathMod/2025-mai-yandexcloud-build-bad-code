@@ -90,8 +90,25 @@ Compose поднимает:
 
 Пайплайн поддерживает два уровня:
 
-- компонентная оценка retrieval/generation через RAGAS;
-- end-to-end прогон по QA-датасету с LLM-as-a-Judge или локальным lexical judge fallback.
+- компонентная оценка retrieval/generation через RAGAS: `context_recall`,
+  `faithfulness`, `factual_correctness`;
+- end-to-end прогон агента по QA-датасету. `ragas_score` считается как
+  геометрическое среднее трёх метрик, точность — как доля примеров с
+  `factual_correctness >= 0.70`.
+
+Оценка использует отдельную judge-модель. Fallback отсутствует: без ключей или при
+ошибке judge-модели команда завершается с ошибкой.
+
+```bash
+export RAGAS_API_KEY=...
+export RAGAS_JUDGE_MODEL=gpt-4o-mini
+# Нужны также YC_FOLDER_ID, YC_API_KEY, JINA_API_KEY и доступный Qdrant.
+python -m rag.cli evaluate rag/data/evaluation/qa_dataset.sample.jsonl \
+  --output rag/data/evaluation/ragas_report.json
+```
+
+Для OpenAI-совместимого провайдера можно задать `RAGAS_BASE_URL`. Порог точности
+настраивается через `RAGAS_FACTUAL_CORRECTNESS_THRESHOLD`.
 
 Пример датасета лежит в `rag/data/evaluation/qa_dataset.sample.jsonl`.
 
@@ -106,11 +123,8 @@ python -m rag.cli mine-chats /path/to/chat_exports rag/data/from_chat/derived --
 
 `update-index` сравнивает хэши файлов с `.index_state.json` и переиндексирует только изменённые источники.
 
-## Зафиксированные результаты целевой конфигурации
+## Результаты целевой конфигурации
 
-- RAGAS score: `0.81`
-- Среднее время ответа: `3.4 с`
-- Стоимость одного запроса: `~0.9 руб.`
-- Точность агента на тестовом датасете: `89%`
-
-Эти числа относятся к целевой облачной конфигурации с Yandex GPT 5 Pro, jina-embeddings-v3 и Qdrant. В offline fallback они не воспроизводятся.
+Числа не зашиты в README. Команда `evaluate` формирует JSON-отчёт с итоговым
+RAGAS score, каждой метрикой, точностью, задержкой и результатами всех примеров.
+Так результат привязан к конкретному датасету и текущей облачной конфигурации.

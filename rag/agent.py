@@ -88,11 +88,20 @@ class AdmissionsAgent:
         self.conversations: dict[str, Conversation] = {}
 
     def ask(self, chat_id: str | int, message: str) -> str:
+        answer, _ = self.ask_with_context(chat_id, message)
+        return answer
+
+    def ask_with_context(
+        self,
+        chat_id: str | int,
+        message: str,
+    ) -> tuple[str, list[str]]:
+        """Return the answer and exact tool outputs used as its context."""
         conversation = self.conversations.setdefault(str(chat_id), Conversation())
         conversation.append("user", message)
 
         plan = self._plan(conversation, message)
-        tool_results = self._execute_plan(plan)
+        tool_results, retrieved_contexts = self._execute_plan(plan)
         context = tool_results or str(plan.get("answer") or "Инструменты не вызывались.")
         structured = self.model.complete_structured(
             [
@@ -111,7 +120,7 @@ class AdmissionsAgent:
         if not answer:
             answer = "Не удалось сформировать ответ. Попробуйте уточнить вопрос."
         conversation.append("assistant", answer)
-        return answer
+        return answer, retrieved_contexts
 
     def _plan(self, conversation: Conversation, question: str) -> dict:
         prompt = PLANNER_PROMPT.format(
@@ -127,11 +136,12 @@ class AdmissionsAgent:
             self.tools.schemas_for_model(),
         )
 
-    def _execute_plan(self, plan: dict) -> str:
+    def _execute_plan(self, plan: dict) -> tuple[str, list[str]]:
         calls = plan.get("tool_calls") or []
         if not calls:
-            return ""
+            return "", []
         results = []
+        contexts = []
         for call in calls[:4]:
             name = call.get("name")
             arguments = call.get("arguments") or {}
@@ -139,4 +149,5 @@ class AdmissionsAgent:
                 arguments = {}
             result = self.tools.call(str(name), arguments)
             results.append(f"## {name}\n{result}")
-        return "\n\n".join(results)
+            contexts.append(result)
+        return "\n\n".join(results), contexts
